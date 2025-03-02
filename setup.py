@@ -4,8 +4,8 @@ setup(
     name="py_ssdi",
     version="0.1.0",
     description="Python implementation of Dynamical Independence for state-space systems",
-    author="Borjan",
-    author_email="borjan@example.com",
+    author="Borjan Milinkovic",
+    author_email="borjan.milinkovic@gmail.com",
     packages=find_packages(),
     install_requires=[
         "numpy",

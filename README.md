@@ -6,13 +6,17 @@ L. Barnett and A. K. Seth, *Dynamical independence: discovering emergent macrosc
 
 This is a Python implementation of the original MATLAB [SSDI-1 toolbox](https://github.com/lcbarnett/ssdi).
 
+## Author
+
+Borjan Milinkovic (borjan.milinkovic@gmail.com)
+
 ## Installation
 
 ### Using Conda (recommended)
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/py_ssdi.git
+git clone https://github.com/borjanm/py_ssdi.git
 cd py_ssdi
 
 # Create and activate the conda environment
@@ -74,6 +78,7 @@ print(f"Causal Emergence: {ce}")
 - Causal Emergence calculation
 - Model transformation and optimization
 - Visualization tools for causal networks
+- Modular connectivity patterns for state-space models
 
 ## License
 
