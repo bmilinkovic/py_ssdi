@@ -221,92 +221,37 @@ def main():
     print(f"  Dynamical Dependence (Positive): {dd_random_positive:.6f}")
     print(f"  Causal Emergence: {ce_random:.6f}")
     
-    # Optimize dynamical dependence using positive measure
-    print(f"\nOptimizing dynamical dependence for macroscopic dimension m={m}...")
-    L_optimal, dd_optimal, all_histories, best_idx = optimize_dynamical_dependence_positive(
+    # Pre-optimization step using positive measure
+    print(f"\nPre-optimizing dynamical dependence for macroscopic dimension m={m}...")
+    L_optimal_pre, dd_optimal_pre, all_histories_pre = optimize_dynamical_dependence_positive(
         model, m, max_iterations=100, num_restarts=5, verbose=True
     )
     
-    # Calculate causal emergence for optimal projection
-    ce_optimal = causal_emergence(model, L_optimal)
+    # Calculate causal emergence for pre-optimized projection
+    ce_optimal_pre = causal_emergence(model, L_optimal_pre)
     
-    print(f"Optimal projection from microscopic (n={n}) to macroscopic (m={m}) space:")
-    print(f"  Dynamical Dependence (Positive): {dd_optimal:.6f}")
-    print(f"  Causal Emergence: {ce_optimal:.6f}")
+    print(f"Pre-optimized projection from microscopic (n={n}) to macroscopic (m={m}) space:")
+    print(f"  Dynamical Dependence (Positive): {dd_optimal_pre:.6f}")
+    print(f"  Causal Emergence: {ce_optimal_pre:.6f}")
     
-    # Print the min value from history for debugging
-    min_history_value = min(all_histories[best_idx])
-    print(f"  Min value in optimization history: {min_history_value:.6f}")
-    print(f"  Initial value to final value ratio: {max(all_histories[best_idx])/min_history_value:.2f}x")
-    
-    # Calculate maximum range across all runs for consistent scaling
-    from py_ssdi.visualization.plotting import plot_optimization_runs
-    
-    # Plot all optimization runs with log scale
-    fig1 = plot_optimization_runs(all_histories, best_idx, use_log_scale='auto')
-    fig1.suptitle(f"Optimization Runs (n={n} → m={m})", fontsize=16)
-    
-    # Plot just the best run using log scale for consistency
-    from py_ssdi.visualization.plotting import plot_optimization_history
-    fig2 = plot_optimization_history(all_histories[best_idx], 
-                                    title=f"Best Dynamical Dependence Optimization Run (n={n} → m={m})",
-                                    positive_dd=True,
-                                    use_log_scale='auto')
-    
-    # Plot causal graph
-    fig3 = plot_causal_graph(model, threshold=0.1)
-    
-    # Calculate DD values for comparison plots for debugging
-    dd_random_for_plot = dynamical_dependence_positive(model, L_random)
-    dd_optimal_for_plot = dynamical_dependence_positive(model, L_optimal)
-    print("\nDD values for projection comparison plot:")
-    print(f"  Random projection: {dd_random_for_plot:.6f}")
-    print(f"  Optimal projection: {dd_optimal_for_plot:.6f}")
-    print(f"  Ratio (Random/Optimal): {dd_random_for_plot/dd_optimal_for_plot:.2f}x")
-    print("  Note: Random projections often have very high DD values compared to optimized projections.")
-    print("        Using log scale for visualization to handle the large range of values.")
-    
-    # Compare projections
-    projections = [L_random, L_optimal]
-    labels = ["Random", "Optimal"]
-    fig4 = plot_projection_comparison(model, projections, labels, 
-                                     title=f"Projection Comparison (n={n} → m={m})",
-                                     use_positive_dd=True,
-                                     use_log_scale='auto')
-    
-    # Try a different macroscopic dimension
-    m2 = 3  # alternative macroscopic dimension
-    print(f"\nTrying alternative macroscopic dimension m={m2}...")
-    L_random2 = random_orthonormal(n, m2)
-    
-    # Optimize for the new dimension
-    L_optimal2, dd_optimal2, all_histories2, best_idx2 = optimize_dynamical_dependence_positive(
-        model, m2, max_iterations=100, num_restarts=5, verbose=True
+    # Full optimization step using spectral method
+    print(f"\nOptimizing dynamical dependence using spectral method for macroscopic dimension m={m}...")
+    L_optimal_spectral, dd_optimal_spectral, all_histories_spectral = optimize_spectral_dynamical_dependence(
+        model, m, max_iterations=100, num_restarts=5, verbose=True
     )
     
-    print(f"  Optimal DD for m={m2}: {dd_optimal2:.6f}")
+    # Calculate causal emergence for fully optimized projection
+    ce_optimal_spectral = causal_emergence(model, L_optimal_spectral)
     
-    # Calculate DD values for multi-dimension comparison for debugging
-    dd_vals = [
-        dynamical_dependence_positive(model, L_random),
-        dynamical_dependence_positive(model, L_optimal),
-        dynamical_dependence_positive(model, L_random2),
-        dynamical_dependence_positive(model, L_optimal2)
-    ]
-    print("\nDD values for dimension comparison plot:")
-    print(f"  Random m={m}: {dd_vals[0]:.6f}")
-    print(f"  Optimal m={m}: {dd_vals[1]:.6f}")
-    print(f"  Random m={m2}: {dd_vals[2]:.6f}")
-    print(f"  Optimal m={m2}: {dd_vals[3]:.6f}")
-    print(f"  Max/Min ratio: {max(dd_vals)/min(dd_vals):.2f}x")
+    print(f"Spectral optimized projection from microscopic (n={n}) to macroscopic (m={m}) space:")
+    print(f"  Dynamical Dependence (Spectral): {dd_optimal_spectral:.6f}")
+    print(f"  Causal Emergence: {ce_optimal_spectral:.6f}")
     
-    # Compare different macroscopic dimensions
-    all_projections = [L_random, L_optimal, L_random2, L_optimal2]
-    all_labels = [f"Random m={m}", f"Optimal m={m}", f"Random m={m2}", f"Optimal m={m2}"]
-    fig5 = plot_projection_comparison(model, all_projections, all_labels,
-                                     title=f"Comparison of Different Macroscopic Dimensions",
-                                     use_positive_dd=True,
-                                     use_log_scale='auto')
+    # Plot the optimization history for pre-optimization
+    fig1 = plot_optimization_history(all_histories_pre, title="Pre-Optimization History")
+    
+    # Plot the optimization history for spectral optimization
+    fig2 = plot_optimization_history(all_histories_spectral, title="Spectral Optimization History")
     
     # Show plots
     plt.show()
