@@ -9,8 +9,21 @@ processes in complex dynamical systems", arXiv:2106.06511 [nlin.AO], 2021.
 __version__ = "0.1.0"
 
 # Import key components for easier access
-from py_ssdi.models import StateSpaceModel, VARModel
-from py_ssdi.metrics import dynamical_dependence, causal_emergence, dynamical_independence_gradient
+from py_ssdi.models import (
+    StateSpaceModel,
+    VARModel,
+)
+
+from py_ssdi.metrics import (
+    dynamical_dependence,
+    causal_emergence,
+    preoptimisation_dynamical_dependence,
+    optimise_preoptimisation_dynamical_dependence,
+    spectral_dynamical_dependence,
+    optimise_spectral_dynamical_dependence,
+    calculate_cak_sequence
+)
+
 from py_ssdi.utils import random_orthonormal, orthonormalize, optimize_dynamical_dependence, cluster_projections
 
 # Import connectivity module

@@ -203,4 +203,21 @@ class StateSpaceModel:
             
             self._P = P
         
-        return self._P 
+        return self._P
+
+    def transfer_function(self):
+        """
+        Calculate the transfer function H = C(I-A)^(-1)K.
+        
+        Returns
+        -------
+        ndarray
+            The transfer function matrix H
+        """
+        # Calculate (I-A)^(-1)
+        I_A_inv = np.linalg.inv(np.eye(self.r) - self.A)
+        
+        # Calculate transfer function H = C(I-A)^(-1)K
+        H = self.C @ I_A_inv @ self.K
+        
+        return H 

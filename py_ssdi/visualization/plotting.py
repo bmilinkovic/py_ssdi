@@ -15,7 +15,8 @@ def plot_optimization_history(history, title="Dynamical Dependence Optimization"
     Parameters
     ----------
     history : list or ndarray
-        History of dynamical dependence values during optimization
+        History of dynamical dependence values during optimization.
+        If a list of lists is provided (multiple restarts), the best history will be plotted.
     title : str, optional
         Plot title
     positive_dd : bool, optional
@@ -33,6 +34,12 @@ def plot_optimization_history(history, title="Dynamical Dependence Optimization"
     """
     fig, ax = plt.subplots(figsize=(10, 6))
     
+    # Handle multiple histories (from multiple restarts)
+    if isinstance(history, list) and len(history) > 0 and isinstance(history[0], list):
+        # Find the best history (the one with the lowest final value)
+        best_history = min(history, key=lambda h: h[-1])
+        history = best_history
+    
     # Determine if we should use log scale
     if use_log_scale == 'auto':
         if min(history) > 0:  # Only consider positive values for log scale
@@ -48,59 +55,15 @@ def plot_optimization_history(history, title="Dynamical Dependence Optimization"
     ax.plot(history, 'b-', linewidth=2)
     
     # Apply log scale if needed
-    if use_log and all(v > 0 for v in history):
-        ax.set_yscale('log')
-        
-        # Add annotation about log scale
-        if max(history) / min(history) > 1000:
-            note_text = ("Note: Log scale used due to large range of values.\n"
-                         "Starting DD values can be thousands of times higher\n"
-                         "than final optimized values.")
-            ax.text(0.02, 0.05, note_text, transform=ax.transAxes, 
-                    fontsize=8, alpha=0.7, bbox=dict(boxstyle="round,pad=0.5", 
-                                                    fc="lightyellow", ec="orange", alpha=0.5))
-    
-    ax.set_xlabel('Iteration', fontsize=12)
-    
-    # Set appropriate y-axis label based on DD type and scale
-    if positive_dd:
-        label = 'Dynamical Dependence (Positive)'
-        if use_log:
-            label += ' - Log Scale'
-    else:
-        label = 'Dynamical Dependence'
-        if use_log:
-            label += ' - Log Scale'
-    
-    ax.set_ylabel(label, fontsize=12)
-    ax.set_title(title, fontsize=14)
-    ax.grid(True, linestyle='--', alpha=0.7)
-    
-    # Add horizontal line at minimum value
-    min_value = min(history)
-    ax.axhline(y=min_value, color='r', linestyle='--', alpha=0.7)
-    
-    # Format the minimum value text based on magnitude
-    if min_value > 1000:
-        min_text = f'Min: {min_value:.2e}'
-    else:
-        min_text = f'Min: {min_value:.6f}'
-    
-    # Position the text appropriately based on scale
     if use_log:
-        text_y_position = min_value * 1.5  # Above the line in log scale
-    else:
-        # For linear scale, position depends on the range
-        value_range = max(history) - min_value
-        if value_range > 0:
-            text_y_position = min_value + (value_range * 0.05)
-        else:
-            text_y_position = min_value * 1.1
+        ax.set_yscale('log')
     
-    ax.text(len(history) * 0.8, text_y_position, min_text, 
-            color='r', fontsize=10)
+    # Customize the plot
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('Dynamical Dependence')
+    ax.set_title(title)
+    ax.grid(True)
     
-    plt.tight_layout()
     return fig
 
 

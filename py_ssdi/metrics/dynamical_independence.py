@@ -242,7 +242,7 @@ def optimise_preoptimisation_dynamical_dependence(model, m, method='gradient_des
 
 def spectral_dynamical_dependence(model, L):
     """
-    Calculate dynamical dependence using the spectral method with transfer function H.
+    Calculate dynamical dependence using the spectral method.
     
     Parameters
     ----------
@@ -262,9 +262,6 @@ def spectral_dynamical_dependence(model, L):
         from py_ssdi.models.state_space import StateSpaceModel
         model = model.to_state_space()
     
-    # Ensure model has normalised residuals
-    model = model.transform_to_normalized()
-    
     # Extract model parameters
     A, C, K = model.A, model.C, model.K
     
@@ -273,30 +270,36 @@ def spectral_dynamical_dependence(model, L):
     q, r = np.linalg.qr(L)
     L = q
     
-    # Calculate transfer function H
-    H = C @ np.linalg.inv(np.eye(A.shape[0]) - A) @ K
+    # Get dimensions
+    n = C.shape[0]  # output dimension
+    r = A.shape[0]  # state dimension
+    m = L.shape[1]  # projection dimension
+    
+    # Calculate transfer function H from the original model
+    H = C @ np.linalg.inv(np.eye(r) - A) @ K
     
     # Calculate dynamical dependence using spectral method
-    D = np.trace(L.T @ H @ H.T @ L)
+    # First project H onto the subspace spanned by L
+    H_proj = L.T @ H
+    
+    # Then calculate the trace of the projected transfer function
+    D = np.trace(H_proj @ H_proj.T)
     
     return D
 
 
-def optimise_spectral_dynamical_dependence(model, m, method='gradient_descent', 
-                                         max_iterations=1000, tolerance=1e-8, 
-                                         step_size=0.1, num_restarts=10, 
-                                         seed=None, verbose=False):
+def optimise_spectral_dynamical_dependence(model, m, method='gradient', max_iterations=10000, tolerance=1e-6, step_size=0.01, num_restarts=100, initial_projections=None, seed=None, verbose=True):
     """
-    Optimise dynamical dependence using the spectral method.
+    Optimise spectral dynamical dependence for a state-space or VAR model.
     
     Parameters
     ----------
     model : StateSpaceModel or VARModel
-        The model to analyse
+        The model to analyze
     m : int
-        Dimension of the projection (m < n)
+        Projection dimension
     method : str, optional
-        Optimisation method ('gradient_descent' or 'evolutionary')
+        Optimisation method ('gradient' or 'trust')
     max_iterations : int, optional
         Maximum number of iterations
     tolerance : float, optional
@@ -305,6 +308,9 @@ def optimise_spectral_dynamical_dependence(model, m, method='gradient_descent',
         Initial step size for gradient descent
     num_restarts : int, optional
         Number of random restarts
+    initial_projections : ndarray, optional
+        Initial projections to use as starting points. If provided, num_restarts should match
+        the number of initial projections.
     seed : int, optional
         Random seed
     verbose : bool, optional
@@ -318,6 +324,8 @@ def optimise_spectral_dynamical_dependence(model, m, method='gradient_descent',
         Optimal dynamical dependence value
     list
         Optimisation history for all runs
+    int
+        Index of the best run
     """
     # Set random seed if provided
     if seed is not None:
@@ -339,8 +347,14 @@ def optimise_spectral_dynamical_dependence(model, m, method='gradient_descent',
         if verbose:
             print(f"Run {run+1}/{num_restarts}")
             
-        # Initialise random projection
-        L = random_orthonormal(n, m)
+        # Use provided initial projection or generate random one
+        if initial_projections is not None:
+            L = initial_projections[run]
+            # Ensure L is 2D
+            if L.ndim == 1:
+                L = L.reshape(-1, 1)
+        else:
+            L = random_orthonormal(n, m)
         
         # Initialise optimisation history
         history = []
@@ -443,8 +457,14 @@ def dynamical_dependence(model, L):
     
     # Calculate residuals covariance matrix V of projected model (solve DARE)
     KKT = K @ K.T
-    # Ensure KKT is symmetric
+    # Ensure KKT is symmetric and check positive definiteness
     KKT = (KKT + KKT.T) / 2
+    try:
+        la.cholesky(KKT)  # This will raise LinAlgError if not positive definite
+    except la.LinAlgError:
+        import warnings
+        warnings.warn("KKT matrix is not positive definite. This may indicate numerical issues in the model.")
+        return np.nan
     
     LC = L.T @ C
     
@@ -465,8 +485,16 @@ def dynamical_dependence(model, L):
         # So B = LC.T should be r x m
         
         # Transpose LC to get the right dimensions for B
-        # dare returns X, L, G (not X, L, G, S as we were trying to unpack)
         V, _, _ = dare(A, LC.T, KKT, np.eye(m))
+        
+        # Check if V is positive definite
+        try:
+            la.cholesky(V)  # This will raise LinAlgError if not positive definite
+        except la.LinAlgError:
+            import warnings
+            warnings.warn("DARE solution V is not positive definite. This may indicate numerical issues in the model.")
+            return np.nan
+            
     except Exception as e:
         print(f"DARE failed: {e}")
         return np.nan
@@ -474,6 +502,11 @@ def dynamical_dependence(model, L):
     # D = log-determinant of residuals covariance matrix V
     try:
         D = log_determinant(V)
+        if D < 0:
+            import warnings
+            warnings.warn(f"Negative dynamical dependence value ({D:.6f}) encountered. "
+                         "This violates the theoretical guarantee that DD should be non-negative. "
+                         "This may indicate numerical issues in the model.")
     except ValueError:
         return np.nan
     
