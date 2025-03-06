@@ -33,6 +33,381 @@ def log_determinant(matrix):
         return logdet
 
 
+def calculate_cak_sequence(model):
+    """
+    Calculate the CAK sequence for a state-space model.
+    This sequence only depends on model parameters and not on the projection L.
+    
+    Parameters
+    ----------
+    model : StateSpaceModel
+        The model to analyse
+        
+    Returns
+    -------
+    ndarray
+        CAK sequence of shape (n, n, r)
+    """
+    # Convert to state-space model if needed
+    from py_ssdi.models.var import VARModel
+    if isinstance(model, VARModel):
+        from py_ssdi.models.state_space import StateSpaceModel
+        model = model.to_state_space()
+    
+    # Ensure model has normalised residuals
+    model = model.transform_to_normalized()
+    
+    # Extract model parameters
+    A, C, K = model.A, model.C, model.K
+    
+    # Calculate CAK sequence
+    r = model.r
+    n = model.n
+    CAK = np.zeros((n, n, r))
+    for k in range(r):
+        CAK[:, :, k] = C @ np.linalg.matrix_power(A, k) @ K
+    
+    return CAK
+
+
+def preoptimisation_dynamical_dependence(model, L, CAK=None):
+    """
+    Calculate dynamical dependence using the Frobenius norm approach for preoptimisation.
+    
+    Parameters
+    ----------
+    model : StateSpaceModel or VARModel
+        The model to analyse
+    L : ndarray
+        Orthonormal subspace basis (n x m), where m < n
+    CAK : ndarray, optional
+        Pre-calculated CAK sequence. If None, it will be calculated.
+        
+    Returns
+    -------
+    float
+        Dynamical dependence value
+    """
+    # Ensure L is orthonormal
+    L = np.asarray(L)
+    q, r = np.linalg.qr(L)
+    L = q
+    
+    # Calculate or use provided CAK sequence
+    if CAK is None:
+        CAK = calculate_cak_sequence(model)
+    
+    # Calculate dynamical dependence using Frobenius norm
+    D = 0
+    for k in range(CAK.shape[2]):
+        LCAKk = L.T @ CAK[:, :, k]
+        LCAKLTk = LCAKk @ L
+        D1k = LCAKk**2
+        D2k = LCAKLTk**2
+        D = D + np.sum(D1k) - np.sum(D2k)
+    
+    return D
+
+
+def optimise_preoptimisation_dynamical_dependence(model, m, method='gradient_descent', 
+                                                max_iterations=1000, tolerance=1e-8, 
+                                                step_size=0.1, num_restarts=10, 
+                                                seed=None, verbose=False):
+    """
+    Optimise dynamical dependence using the preoptimisation method.
+    
+    Parameters
+    ----------
+    model : StateSpaceModel or VARModel
+        The model to analyse
+    m : int
+        Dimension of the projection (m < n)
+    method : str, optional
+        Optimisation method ('gradient_descent' or 'evolutionary')
+    max_iterations : int, optional
+        Maximum number of iterations
+    tolerance : float, optional
+        Convergence tolerance
+    step_size : float, optional
+        Initial step size for gradient descent
+    num_restarts : int, optional
+        Number of random restarts
+    seed : int, optional
+        Random seed
+    verbose : bool, optional
+        Whether to print progress
+        
+    Returns
+    -------
+    ndarray
+        Optimal projection matrix
+    float
+        Optimal dynamical dependence value
+    list
+        Optimisation history for all runs
+    int
+        Index of the best run
+    """
+    # Set random seed if provided
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # Get model dimension
+    n = model.n
+    
+    # Pre-calculate CAK sequence
+    CAK = calculate_cak_sequence(model)
+    
+    # Initialise best solution
+    best_L = None
+    best_dd = float('inf')
+    best_idx = 0
+    
+    # Store histories for all runs
+    all_histories = []
+    
+    # Run optimisation with multiple restarts
+    for run in range(num_restarts):
+        if verbose:
+            print(f"Run {run+1}/{num_restarts}")
+            
+        # Initialise random projection
+        L = random_orthonormal(n, m)
+        
+        # Initialise optimisation history
+        history = []
+        
+        # Initialise step size
+        current_step_size = step_size
+        
+        # Gradient descent optimisation
+        for iteration in range(max_iterations):
+            # Calculate current dynamical dependence using pre-calculated CAK
+            dd = preoptimisation_dynamical_dependence(model, L, CAK)
+            
+            # Store in history
+            history.append(dd)
+            
+            # Calculate gradient
+            G, mG = dynamical_independence_gradient(model, L, CAK)
+            
+            # Check convergence
+            if mG < tolerance:
+                if verbose:
+                    print(f"  Converged after {iteration} iterations. DD: {dd:.6f}")
+                break
+            
+            # Update projection using gradient descent on Stiefel manifold
+            L_new = orthonormalise(L - current_step_size * G)
+            
+            # Calculate new dynamical dependence using pre-calculated CAK
+            dd_new = preoptimisation_dynamical_dependence(model, L_new, CAK)
+            
+            # Line search (simple backtracking)
+            while dd_new > dd and current_step_size > tolerance:
+                current_step_size *= 0.5
+                L_new = orthonormalise(L - current_step_size * G)
+                dd_new = preoptimisation_dynamical_dependence(model, L_new, CAK)
+            
+            # Update projection
+            if dd_new < dd:
+                L = L_new
+                # Increase step size if successful
+                current_step_size *= 1.2
+            else:
+                # If no improvement, reduce step size
+                current_step_size *= 0.5
+            
+            # Check if step size is too small
+            if current_step_size < tolerance:
+                if verbose:
+                    print(f"  Step size too small after {iteration} iterations. DD: {dd:.6f}")
+                break
+        
+        # Store history for this run
+        all_histories.append(history)
+        
+        # Check if this run found a better solution
+        final_dd = preoptimisation_dynamical_dependence(model, L, CAK)
+        if final_dd < best_dd:
+            best_L = L
+            best_dd = final_dd
+            best_idx = run
+    
+    if verbose:
+        print(f"Best run: {best_idx+1}/{num_restarts}. Best DD: {best_dd:.6f}")
+    
+    return best_L, best_dd, all_histories, best_idx
+
+
+def spectral_dynamical_dependence(model, L):
+    """
+    Calculate dynamical dependence using the spectral method with transfer function H.
+    
+    Parameters
+    ----------
+    model : StateSpaceModel or VARModel
+        The model to analyse
+    L : ndarray
+        Orthonormal subspace basis (n x m), where m < n
+        
+    Returns
+    -------
+    float
+        Dynamical dependence value
+    """
+    # Convert to state-space model if needed
+    from py_ssdi.models.var import VARModel
+    if isinstance(model, VARModel):
+        from py_ssdi.models.state_space import StateSpaceModel
+        model = model.to_state_space()
+    
+    # Ensure model has normalised residuals
+    model = model.transform_to_normalized()
+    
+    # Extract model parameters
+    A, C, K = model.A, model.C, model.K
+    
+    # Ensure L is orthonormal
+    L = np.asarray(L)
+    q, r = np.linalg.qr(L)
+    L = q
+    
+    # Calculate transfer function H
+    H = C @ np.linalg.inv(np.eye(A.shape[0]) - A) @ K
+    
+    # Calculate dynamical dependence using spectral method
+    D = np.trace(L.T @ H @ H.T @ L)
+    
+    return D
+
+
+def optimise_spectral_dynamical_dependence(model, m, method='gradient_descent', 
+                                         max_iterations=1000, tolerance=1e-8, 
+                                         step_size=0.1, num_restarts=10, 
+                                         seed=None, verbose=False):
+    """
+    Optimise dynamical dependence using the spectral method.
+    
+    Parameters
+    ----------
+    model : StateSpaceModel or VARModel
+        The model to analyse
+    m : int
+        Dimension of the projection (m < n)
+    method : str, optional
+        Optimisation method ('gradient_descent' or 'evolutionary')
+    max_iterations : int, optional
+        Maximum number of iterations
+    tolerance : float, optional
+        Convergence tolerance
+    step_size : float, optional
+        Initial step size for gradient descent
+    num_restarts : int, optional
+        Number of random restarts
+    seed : int, optional
+        Random seed
+    verbose : bool, optional
+        Whether to print progress
+        
+    Returns
+    -------
+    ndarray
+        Optimal projection matrix
+    float
+        Optimal dynamical dependence value
+    list
+        Optimisation history for all runs
+    """
+    # Set random seed if provided
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # Get model dimension
+    n = model.n
+    
+    # Initialise best solution
+    best_L = None
+    best_dd = float('inf')
+    best_idx = 0
+    
+    # Store histories for all runs
+    all_histories = []
+    
+    # Run optimisation with multiple restarts
+    for run in range(num_restarts):
+        if verbose:
+            print(f"Run {run+1}/{num_restarts}")
+            
+        # Initialise random projection
+        L = random_orthonormal(n, m)
+        
+        # Initialise optimisation history
+        history = []
+        
+        # Initialise step size
+        current_step_size = step_size
+        
+        # Gradient descent optimisation
+        for iteration in range(max_iterations):
+            # Calculate current dynamical dependence
+            dd = spectral_dynamical_dependence(model, L)
+            
+            # Store in history
+            history.append(dd)
+            
+            # Calculate gradient
+            G, mG = dynamical_independence_gradient(model, L)
+            
+            # Check convergence
+            if mG < tolerance:
+                if verbose:
+                    print(f"  Converged after {iteration} iterations. DD: {dd:.6f}")
+                break
+            
+            # Update projection using gradient descent on Stiefel manifold
+            L_new = orthonormalise(L - current_step_size * G)
+            
+            # Calculate new dynamical dependence
+            dd_new = spectral_dynamical_dependence(model, L_new)
+            
+            # Line search (simple backtracking)
+            while dd_new > dd and current_step_size > tolerance:
+                current_step_size *= 0.5
+                L_new = orthonormalise(L - current_step_size * G)
+                dd_new = spectral_dynamical_dependence(model, L_new)
+            
+            # Update projection
+            if dd_new < dd:
+                L = L_new
+                # Increase step size if successful
+                current_step_size *= 1.2
+            else:
+                # If no improvement, reduce step size
+                current_step_size *= 0.5
+            
+            # Check if step size is too small
+            if current_step_size < tolerance:
+                if verbose:
+                    print(f"  Step size too small after {iteration} iterations. DD: {dd:.6f}")
+                break
+        
+        # Store history for this run
+        all_histories.append(history)
+        
+        # Check if this run found a better solution
+        final_dd = spectral_dynamical_dependence(model, L)
+        if final_dd < best_dd:
+            best_L = L
+            best_dd = final_dd
+            best_idx = run
+    
+    if verbose:
+        print(f"Best run: {best_idx+1}/{num_restarts}. Best DD: {best_dd:.6f}")
+    
+    return best_L, best_dd, all_histories, best_idx
+
+
 def dynamical_dependence(model, L):
     """
     Calculate dynamical dependence of projection L for a state-space or VAR model.
@@ -190,7 +565,47 @@ def causal_emergence(model, L):
     return CE
 
 
-def dynamical_independence_gradient(model, L):
+def dynamical_dependence_positive(model, L, CAK=None):
+    """
+    Calculate dynamical dependence using the Frobenius norm approach (MATLAB-style),
+    which always returns positive values.
+    
+    Parameters
+    ----------
+    model : StateSpaceModel or VARModel
+        The model to analyze
+    L : ndarray
+        Orthonormal subspace basis (n x m), where m < n
+    CAK : ndarray, optional
+        Pre-calculated CAK sequence. If None, it will be calculated.
+        
+    Returns
+    -------
+    float
+        Dynamical dependence value (always positive)
+    """
+    # Ensure L is orthonormal
+    L = np.asarray(L)
+    q, r = np.linalg.qr(L)
+    L = q
+    
+    # Calculate or use provided CAK sequence
+    if CAK is None:
+        CAK = calculate_cak_sequence(model)
+    
+    # Calculate dynamical dependence (MATLAB-style)
+    D = 0
+    for k in range(CAK.shape[2]):
+        LCAKk = L.T @ CAK[:, :, k]
+        LCAKLTk = LCAKk @ L
+        D1k = LCAKk**2
+        D2k = LCAKLTk**2
+        D = D + np.sum(D1k) - np.sum(D2k)
+    
+    return D
+
+
+def dynamical_independence_gradient(model, L, CAK=None):
     """
     Calculate gradient of dynamical dependence with respect to projection L.
     
@@ -200,6 +615,8 @@ def dynamical_independence_gradient(model, L):
         The model to analyze
     L : ndarray
         Orthonormal subspace basis (n x m), where m < n
+    CAK : ndarray, optional
+        Pre-calculated CAK sequence. If None, it will be calculated.
         
     Returns
     -------
@@ -208,34 +625,19 @@ def dynamical_independence_gradient(model, L):
     float
         Magnitude of gradient
     """
-    # Convert to state-space model if needed
-    from py_ssdi.models.var import VARModel
-    if isinstance(model, VARModel):
-        from py_ssdi.models.state_space import StateSpaceModel
-        model = model.to_state_space()
-    
-    # Ensure model has normalized residuals
-    model = model.transform_to_normalized()
-    
-    # Extract model parameters
-    A, C, K = model.A, model.C, model.K
-    
     # Ensure L is orthonormal
     L = np.asarray(L)
     q, r = np.linalg.qr(L)
     L = q
     
-    # Get CAK sequence
-    r = model.r
-    n = model.n
-    CAK = np.zeros((n, n, r))
-    for k in range(r):
-        CAK[:, :, k] = C @ np.linalg.matrix_power(A, k) @ K
+    # Calculate or use provided CAK sequence
+    if CAK is None:
+        CAK = calculate_cak_sequence(model)
     
     # Calculate gradient
     P = L @ L.T
-    g = np.zeros((n, n))
-    for k in range(r):
+    g = np.zeros((CAK.shape[0], CAK.shape[1]))
+    for k in range(CAK.shape[2]):
         Q = CAK[:, :, k]
         QT = Q.T
         g = g + Q @ QT - QT @ P @ Q - Q @ P @ QT
@@ -250,344 +652,40 @@ def dynamical_independence_gradient(model, L):
     return G, mG
 
 
-def dynamical_dependence_positive(model, L):
+def random_orthonormal(n, m):
     """
-    Calculate dynamical dependence using the Frobenius norm approach (MATLAB-style),
-    which always returns positive values.
+    Generate a random orthonormal matrix of size n x m.
     
     Parameters
     ----------
-    model : StateSpaceModel or VARModel
-        The model to analyze
-    L : ndarray
-        Orthonormal subspace basis (n x m), where m < n
-        
-    Returns
-    -------
-    float
-        Dynamical dependence value (always positive)
-    """
-    # Convert to state-space model if needed
-    from py_ssdi.models.var import VARModel
-    if isinstance(model, VARModel):
-        from py_ssdi.models.state_space import StateSpaceModel
-        model = model.to_state_space()
-    
-    # Ensure model has normalized residuals
-    model = model.transform_to_normalized()
-    
-    # Extract model parameters
-    A, C, K = model.A, model.C, model.K
-    
-    # Ensure L is orthonormal
-    L = np.asarray(L)
-    q, r = np.linalg.qr(L)
-    L = q
-    
-    # Get CAK sequence (similar to MATLAB implementation)
-    r = model.r
-    n = model.n
-    CAK = np.zeros((n, n, r))
-    for k in range(r):
-        CAK[:, :, k] = C @ np.linalg.matrix_power(A, k) @ K
-    
-    # Calculate dynamical dependence (MATLAB-style)
-    D = 0
-    for k in range(r):
-        LCAKk = L.T @ CAK[:, :, k]
-        LCAKLTk = LCAKk @ L
-        D1k = LCAKk**2
-        D2k = LCAKLTk**2
-        D = D + np.sum(D1k) - np.sum(D2k)
-    
-    return D
-
-
-def optimize_dynamical_dependence_positive(model, m, method='gradient_descent', 
-                                          max_iterations=1000, tolerance=1e-8, 
-                                          step_size=0.1, num_restarts=10, 
-                                          seed=None, verbose=False):
-    """
-    Optimize dynamical dependence to find the optimal projection using positive DD measures.
-    
-    Parameters
-    ----------
-    model : StateSpaceModel or VARModel
-        The model to analyze
+    n : int
+        Number of rows
     m : int
-        Dimension of the projection (m < n)
-    method : str, optional
-        Optimization method ('gradient_descent' or 'evolutionary')
-    max_iterations : int, optional
-        Maximum number of iterations
-    tolerance : float, optional
-        Convergence tolerance
-    step_size : float, optional
-        Initial step size for gradient descent
-    num_restarts : int, optional
-        Number of random restarts
-    seed : int, optional
-        Random seed
-    verbose : bool, optional
-        Whether to print progress
+        Number of columns
         
     Returns
     -------
     ndarray
-        Optimal projection matrix
-    float
-        Optimal dynamical dependence value
-    list
-        Optimization history for all runs
+        Random orthonormal matrix
     """
-    # Set random seed if provided
-    if seed is not None:
-        np.random.seed(seed)
-    
-    # Get model dimension
-    n = model.n
-    
-    # Initialize best solution
-    best_L = None
-    best_dd = float('inf')
-    
-    # Store histories for all runs
-    all_histories = []
-    
-    # Run optimization with multiple restarts
-    for run in range(num_restarts):
-        if verbose:
-            print(f"Run {run+1}/{num_restarts}")
-            
-        # Initialize random projection
-        L = random_orthonormal(n, m)
-        
-        # Initialize optimization history
-        history = []
-        
-        # Initialize step size
-        current_step_size = step_size
-        
-        # Gradient descent optimization
-        for iteration in range(max_iterations):
-            # Calculate current dynamical dependence
-            dd = dynamical_dependence_positive(model, L)
-            
-            # Store in history
-            history.append(dd)
-            
-            # Calculate gradient
-            G, mG = dynamical_independence_gradient(model, L)
-            
-            # Check convergence
-            if mG < tolerance:
-                if verbose:
-                    print(f"  Converged after {iteration} iterations. DD: {dd:.6f}")
-                break
-            
-            # Update projection using gradient descent on Stiefel manifold
-            L_new = orthonormalize(L - current_step_size * G)
-            
-            # Calculate new dynamical dependence
-            dd_new = dynamical_dependence_positive(model, L_new)
-            
-            # Line search (simple backtracking)
-            while dd_new > dd and current_step_size > tolerance:
-                current_step_size *= 0.5
-                L_new = orthonormalize(L - current_step_size * G)
-                dd_new = dynamical_dependence_positive(model, L_new)
-            
-            # Update projection
-            if dd_new < dd:
-                L = L_new
-                # Increase step size if successful
-                current_step_size *= 1.2
-            else:
-                # If no improvement, reduce step size
-                current_step_size *= 0.5
-            
-            # Check if step size is too small
-            if current_step_size < tolerance:
-                if verbose:
-                    print(f"  Step size too small after {iteration} iterations. DD: {dd:.6f}")
-                break
-        
-        # Store history for this run
-        all_histories.append(history)
-        
-        # Check if this run found a better solution
-        final_dd = dynamical_dependence_positive(model, L)
-        if final_dd < best_dd:
-            best_L = L
-            best_dd = final_dd
-    
-    if verbose:
-        print(f"Best run: {best_idx+1}/{num_restarts}. Best DD: {best_dd:.6f}")
-    
-    return best_L, best_dd, all_histories
+    A = np.random.randn(n, m)
+    q, r = np.linalg.qr(A)
+    return q
 
 
-def spectral_dynamical_dependence(model, L):
+def orthonormalise(matrix):
     """
-    Calculate dynamical dependence using the spectral method with transfer function H.
+    Orthonormalise a matrix.
     
     Parameters
     ----------
-    model : StateSpaceModel or VARModel
-        The model to analyze
-    L : ndarray
-        Orthonormal subspace basis (n x m), where m < n
-        
-    Returns
-    -------
-    float
-        Dynamical dependence value
-    """
-    # Convert to state-space model if needed
-    from py_ssdi.models.var import VARModel
-    if isinstance(model, VARModel):
-        from py_ssdi.models.state_space import StateSpaceModel
-        model = model.to_state_space()
-    
-    # Ensure model has normalized residuals
-    model = model.transform_to_normalized()
-    
-    # Extract model parameters
-    A, C, K = model.A, model.C, model.K
-    
-    # Ensure L is orthonormal
-    L = np.asarray(L)
-    q, r = np.linalg.qr(L)
-    L = q
-    
-    # Calculate transfer function H
-    H = C @ np.linalg.inv(np.eye(A.shape[0]) - A) @ K
-    
-    # Calculate dynamical dependence using spectral method
-    D = np.trace(L.T @ H @ H.T @ L)
-    
-    return D
-
-
-def optimize_spectral_dynamical_dependence(model, m, method='gradient_descent', 
-                                          max_iterations=1000, tolerance=1e-8, 
-                                          step_size=0.1, num_restarts=10, 
-                                          seed=None, verbose=False):
-    """
-    Optimize dynamical dependence using the spectral method to find the optimal projection.
-    
-    Parameters
-    ----------
-    model : StateSpaceModel or VARModel
-        The model to analyze
-    m : int
-        Dimension of the projection (m < n)
-    method : str, optional
-        Optimization method ('gradient_descent' or 'evolutionary')
-    max_iterations : int, optional
-        Maximum number of iterations
-    tolerance : float, optional
-        Convergence tolerance
-    step_size : float, optional
-        Initial step size for gradient descent
-    num_restarts : int, optional
-        Number of random restarts
-    seed : int, optional
-        Random seed
-    verbose : bool, optional
-        Whether to print progress
+    matrix : ndarray
+        Input matrix
         
     Returns
     -------
     ndarray
-        Optimal projection matrix
-    float
-        Optimal dynamical dependence value
-    list
-        Optimization history for all runs
+        Orthonormalised matrix
     """
-    # Set random seed if provided
-    if seed is not None:
-        np.random.seed(seed)
-    
-    # Get model dimension
-    n = model.n
-    
-    # Initialize best solution
-    best_L = None
-    best_dd = float('inf')
-    
-    # Store histories for all runs
-    all_histories = []
-    
-    # Run optimization with multiple restarts
-    for run in range(num_restarts):
-        if verbose:
-            print(f"Run {run+1}/{num_restarts}")
-            
-        # Initialize random projection
-        L = random_orthonormal(n, m)
-        
-        # Initialize optimization history
-        history = []
-        
-        # Initialize step size
-        current_step_size = step_size
-        
-        # Gradient descent optimization
-        for iteration in range(max_iterations):
-            # Calculate current dynamical dependence
-            dd = spectral_dynamical_dependence(model, L)
-            
-            # Store in history
-            history.append(dd)
-            
-            # Calculate gradient
-            G, mG = dynamical_independence_gradient(model, L)
-            
-            # Check convergence
-            if mG < tolerance:
-                if verbose:
-                    print(f"  Converged after {iteration} iterations. DD: {dd:.6f}")
-                break
-            
-            # Update projection using gradient descent on Stiefel manifold
-            L_new = orthonormalize(L - current_step_size * G)
-            
-            # Calculate new dynamical dependence
-            dd_new = spectral_dynamical_dependence(model, L_new)
-            
-            # Line search (simple backtracking)
-            while dd_new > dd and current_step_size > tolerance:
-                current_step_size *= 0.5
-                L_new = orthonormalize(L - current_step_size * G)
-                dd_new = spectral_dynamical_dependence(model, L_new)
-            
-            # Update projection
-            if dd_new < dd:
-                L = L_new
-                # Increase step size if successful
-                current_step_size *= 1.2
-            else:
-                # If no improvement, reduce step size
-                current_step_size *= 0.5
-            
-            # Check if step size is too small
-            if current_step_size < tolerance:
-                if verbose:
-                    print(f"  Step size too small after {iteration} iterations. DD: {dd:.6f}")
-                break
-        
-        # Store history for this run
-        all_histories.append(history)
-        
-        # Check if this run found a better solution
-        final_dd = spectral_dynamical_dependence(model, L)
-        if final_dd < best_dd:
-            best_L = L
-            best_dd = final_dd
-    
-    if verbose:
-        print(f"Best run: {best_idx+1}/{num_restarts}. Best DD: {best_dd:.6f}")
-    
-    return best_L, best_dd, all_histories 
+    q, r = np.linalg.qr(matrix)
+    return q 

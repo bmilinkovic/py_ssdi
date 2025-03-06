@@ -63,7 +63,7 @@ ss_model = StateSpaceModel.create_random(n, 3*n, 0.9)
 
 # Compute dynamical dependence for a projection
 L = np.random.randn(n, 2)  # random projection to 2D
-L, _ = np.linalg.qr(L)  # orthonormalize
+L, _ = np.linalg.qr(L)  # orthonormalise
 
 dd = dynamical_dependence(ss_model, L)
 ce = causal_emergence(ss_model, L)
@@ -81,7 +81,7 @@ from py_ssdi.connectivity import (
     create_modular_connectivity,
     create_canonical_9node_model,
     create_canonical_16node_model,
-    visualize_connectivity
+    visualise_connectivity
 )
 
 # Create a canonical 9-node model with 3 modules (sizes 2, 3, 4)
@@ -98,8 +98,8 @@ custom_model = create_modular_connectivity(
     rmii=0.1  # residuals multiinformation
 )
 
-# Visualize the connectivity structure
-fig = visualize_connectivity(custom_model, module_sizes)
+# Visualise the connectivity structure
+fig = visualise_connectivity(custom_model, module_sizes)
 ```
 
 ## Features
@@ -108,12 +108,12 @@ fig = visualize_connectivity(custom_model, module_sizes)
 - VAR model creation and analysis
 - Dynamical Independence metrics
 - Causal Emergence calculation
-- Model transformation and optimization
-- Visualization tools for causal networks
+- Model transformation and optimisation
+- Visualisation tools for causal networks
 - Modular connectivity patterns for state-space models:
   - Create models with specified module sizes and inter-module connections
   - Canonical model configurations (9-node, 16-node, 68-node)
-  - Visualization of connectivity structures
+  - Visualisation of connectivity structures
 
 ## Example Scripts
 
@@ -124,16 +124,16 @@ The package includes example scripts to demonstrate its functionality:
 Demonstrates the core functionality of the package:
 - Creating random state-space and VAR models
 - Computing dynamical dependence and causal emergence
-- Optimizing dynamical dependence using gradient descent
-- Visualizing optimization results and causal graphs
+- Optimising dynamical dependence using gradient descent
+- Visualising optimisation results and causal graphs
 
 ### Connectivity Example (py_ssdi/examples/connectivity_example.py)
 
 Showcases the new connectivity module:
 - Creating state-space models with modular connectivity patterns
-- Visualizing the connectivity structure with module boundaries
-- Optimizing dynamical dependence across multiple macroscopic scales
-- Comparing random vs. optimized projections for different scales
+- Visualising the connectivity structure with module boundaries
+- Optimising dynamical dependence across multiple macroscopic scales
+- Comparing random vs. optimised projections for different scales
 
 To run the examples:
 
