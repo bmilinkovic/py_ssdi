@@ -2,7 +2,7 @@
 
 This is a Python package for Dynamical Independence (DI) analysis on Linear State-space (SS) models. DI is a particular framework for quantifying and detecting macroscopic observables directly from continuous-valued time-series data. 
 
-This package is porting of the original MATLAB code for Dynamical Independence (ssdi) developed by Dr. Lionel Barnett at the Sussex Centre for Consciousness Science (SCCS), University of Sussex. His original, MATLAB code can be found at https://github.com/lcbarnett/ssdi. 
+This package is a porting of the original MATLAB code for Dynamical Independence (ssdi) developed by Dr. Lionel Barnett at the Sussex Centre for Consciousness Science (SCCS), University of Sussex. His original, MATLAB code can be found at https://github.com/lcbarnett/ssdi. 
 
 If you have any questions or want to report any bugs please do so through the standard github channels or contact the author at: borjan.milinkovic@gmail.com
 
